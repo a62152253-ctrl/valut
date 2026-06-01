@@ -774,6 +774,7 @@ if (!$is_locked) {
 </div><!-- .layout -->
 
 <!-- ═══════════════ ADD / EDIT MODAL ═══════════════ -->
+<!-- ═══════════════ ADD / EDIT MODAL ═══════════════ -->
 <div id="pwModal" class="pw-modal-overlay">
     <div class="pw-modal-box">
         <button class="pw-modal-close" onclick="closeModal()">×</button>
@@ -785,8 +786,13 @@ if (!$is_locked) {
         </div>
         <div class="pw-form-group">
             <label for="fUrl">Website URL</label>
-            <input type="url" id="fUrl" placeholder="https://example.com" autocomplete="off">
-        </div>
+<input 
+    type="url" 
+    id="fUrl" 
+    placeholder="https://example.com" 
+    autocomplete="off"
+
+
         <div class="pw-form-group">
             <label for="fUser">Username / Email</label>
             <input type="text" id="fUser" placeholder="you@example.com" autocomplete="off">
