@@ -1,0 +1,162 @@
+version: '3.8'
+
+services:
+  # PHP-FPM application service
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vaultly-app
+    restart: unless-stopped
+    working_dir: /app
+    environment:
+      - DB_HOST=mysql
+      - DB_USER=vaultly_user
+      - DB_PASS=${DB_PASSWORD:-change_me_secure_password}
+      - DB_NAME=vaultly_db
+      - PHP_ENV=production
+      - APP_URL=https://vaultly.local
+      - SMTP_HOST=${SMTP_HOST:-smtp.gmail.com}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASS=${SMTP_PASS}
+      - MAIL_FROM=${MAIL_FROM:-noreply@vaultly.local}
+      - FORCE_HTTPS=true
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - vaultly_network
+    volumes:
+      - ./:/app
+      - ./uploads:/app/uploads
+      - ./logs:/var/log/vaultly
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://app:9000/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+  # MySQL 8.0 database service
+  mysql:
+    image: mysql:8.0-alpine
+    container_name: vaultly-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-change_me_root_password}
+      MYSQL_DATABASE: vaultly_db
+      MYSQL_USER: vaultly_user
+      MYSQL_PASSWORD: ${DB_PASSWORD:-change_me_secure_password}
+    networks:
+      - vaultly_network
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./sql:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "vaultly_user", "-p${DB_PASSWORD:-change_me_secure_password}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    command: >
+      --default-authentication-plugin=mysql_native_password
+      --sql-mode="STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION"
+      --max_connections=100
+      --wait_timeout=300
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 768M
+        reservations:
+          cpus: '0.5'
+          memory: 384M
+
+  # Nginx web server
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: vaultly-web
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./:/app
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - vaultly_network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  # Backup service (runs daily at 2 AM)
+  backup:
+    image: mysql:8.0-alpine
+    container_name: vaultly-backup
+    restart: always
+    depends_on:
+      - mysql
+    environment:
+      - DB_HOST=mysql
+      - DB_USER=vaultly_user
+      - DB_PASS=${DB_PASSWORD:-change_me_secure_password}
+      - DB_NAME=vaultly_db
+      - BACKUP_RETENTION_DAYS=30
+    volumes:
+      - ./backups:/backups
+    networks:
+      - vaultly_network
+    command: >
+      sh -c "
+      while true; do
+        mysqldump -h mysql -u vaultly_user -p${DB_PASSWORD:-change_me_secure_password} 
+          --single-transaction --quick --lock-tables=false vaultly_db |
+          gzip > /backups/vaultly-backup-$(date +%Y%m%d_%H%M%S).sql.gz;
+        find /backups -name 'vaultly-backup-*.sql.gz' -mtime +30 -delete;
+        echo 'Backup completed at '$(date);
+        sleep 86400;
+      done
+      "
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+networks:
+  vaultly_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  mysql_data:
+    driver: local

@@ -1,0 +1,56 @@
+# Security headers
+<IfModule mod_headers.c>
+    # Prevent clickjacking — DENY is stronger than SAMEORIGIN
+    Header always set X-Frame-Options "DENY"
+    
+    # Prevent MIME type sniffing
+    Header always set X-Content-Type-Options "nosniff"
+    
+    # Enable XSS protection
+    Header always set X-XSS-Protection "1; mode=block"
+    
+    # Referrer policy
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    
+    # Content Security Policy
+    # - style-src includes fonts.googleapis.com (app.css @import Inter)
+    # - font-src includes fonts.gstatic.com (actual woff2 files)
+    # - connect-src includes api.pwnedpasswords.com (HIBP k-anonymity check)
+    # - script-src now 'none' except unsafe-inline (disables console injection)
+    # - object-src 'none' (blocks plugin embeds)
+    Header always set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://api.pwnedpasswords.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+    
+    # HTTPS enforcement (uncomment for production)
+    # Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    
+    # Permissions policy
+    Header always set Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=()"
+</IfModule>
+
+# Disable directory listing
+<IfModule mod_autoindex.c>
+    Options -Indexes
+</IfModule>
+
+# Deny access to sensitive files
+<FilesMatch "\.env|\.git|config\.php|\.htaccess|backup|database">
+    Order Allow,Deny
+    Deny from all
+</FilesMatch>
+
+# Force HTTPS (uncomment for production)
+# <IfModule mod_rewrite.c>
+#     RewriteEngine On
+#     RewriteCond %{HTTPS} off
+#     RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+# </IfModule>
+
+# Set PHP security options
+<IfModule mod_php.c>
+    php_value upload_max_filesize 10M
+    php_value post_max_size 10M
+    php_value max_input_time 60
+    php_value max_execution_time 300
+    php_flag register_globals off
+    php_flag expose_php off
+</IfModule>

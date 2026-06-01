@@ -1,0 +1,35 @@
+#!/bin/bash
+# Quick reference for Vaultly Docker commands
+
+## Setup
+./docker-setup.sh              # Initial setup and start
+
+## Services Management
+docker-compose up -d           # Start all services
+docker-compose down            # Stop all services
+docker-compose ps              # Check service status
+docker-compose logs -f         # View real-time logs
+docker-compose logs -f [service]  # Log specific service (app, mysql, nginx)
+
+## Database
+docker-compose exec mysql mysql -u root -p  # MySQL shell
+docker-compose exec mysql mysqldump -u root -p [database] > backup.sql  # Backup
+
+## Rebuild
+docker-compose build --no-cache      # Full rebuild
+docker-compose up -d --build         # Build and start
+
+## Development
+docker-compose exec app php -v       # PHP version
+docker-compose exec app php -m       # Loaded PHP modules
+docker-compose exec app ls -la /app  # File listing
+
+## Cleanup
+docker-compose down -v               # Stop + remove volumes
+docker system prune -a               # Remove unused images/volumes
+docker builder prune                 # Clean build cache
+
+## Production Deployment
+export ENVIRONMENT=production
+docker-compose -f docker-compose.yml up -d
+docker-compose exec app php artisan migrate  # If needed
