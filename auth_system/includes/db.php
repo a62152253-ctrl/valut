@@ -35,14 +35,12 @@ for ($i = 0; $i < $retries; $i++) {
 // Check connection
 if (!$conn || $conn->connect_error) {
     http_response_code(503);
-    die("<div style='color:red; font-family:Arial; padding:20px; background:#fff3cd;'><strong>⚠ Database Connection Error</strong><br><br>" . 
-        "Error: " . htmlspecialchars($conn->connect_error ?? 'Connection failed') . "<br><br>" .
-        "<strong>How to fix:</strong><br>" .
-        "1. Start MySQL from XAMPP Control Panel<br>" .
-        "2. Wait 10 seconds for MySQL to start<br>" .
-        "3. Refresh this page<br><br>" .
-        "If error persists, check XAMPP MySQL service." .
-        "</div>");
+    // Never expose MySQL error details in production
+    if (getenv('APP_DEBUG') === 'true') {
+        $detail = htmlspecialchars($conn->connect_error ?? 'Connection failed');
+        die("<div style='color:red;font-family:Arial;padding:20px;background:#fff3cd;'><strong>DB Error (debug):</strong> $detail</div>");
+    }
+    die("<div style='font-family:Arial;padding:40px;text-align:center;'><h2>Service temporarily unavailable</h2><p>Please try again in a moment.</p></div>");
 }
 
 // Create database if not exists

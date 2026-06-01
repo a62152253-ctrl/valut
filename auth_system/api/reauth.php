@@ -5,6 +5,7 @@
  */
 session_start();
 include '../includes/db.php';
+include '../includes/vault_auth.php';
 
 header('Content-Type: application/json');
 
@@ -24,14 +25,14 @@ if ($method !== 'POST') {
 // Rate limit re-auth attempts
 vaultRateLimit('reauth_' . $user_id, 10, 300);  // 10 attempts per 5 min
 
-$input = json_decode(file_get_contents('php://input'), true) ?? [];
+$input    = json_decode(file_get_contents('php://input'), true) ?? [];
+// Accept both JSON body and FormData
+$password = $_POST['password'] ?? $input['password'] ?? '';
 
-if (empty($input['password'])) {
+if (empty($password)) {
     http_response_code(400);
     die(json_encode(['error' => 'Password required']));
 }
-
-$password = $input['password'];
 
 // Fetch user's password hash
 $stmt = $conn->prepare("SELECT password FROM users WHERE id = ?");

@@ -1,0 +1,36 @@
+# Environment & secrets — NEVER commit these
+.env
+*.env
+.env.local
+.env.production
+
+# PHP dependencies
+vendor/
+composer.lock
+
+# Logs
+*.log
+logs/
+auth_system/logs/
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Test / dev files
+auth_system/test_connection.php
+auth_system/test-recent-items.php
+auth_system/test-integration.sh
+auth_system/IMPLEMENTATION_EXAMPLE.php
+
+# Database dumps
+*.sql.gz
+*.dump
+*.bak

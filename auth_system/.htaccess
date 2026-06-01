@@ -38,19 +38,36 @@
     Deny from all
 </FilesMatch>
 
-# Force HTTPS (uncomment for production)
+# Force HTTPS — uncomment when SSL cert is installed
 # <IfModule mod_rewrite.c>
 #     RewriteEngine On
 #     RewriteCond %{HTTPS} off
 #     RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
 # </IfModule>
 
-# Set PHP security options
+# PHP security hardening
 <IfModule mod_php.c>
+    # File limits
     php_value upload_max_filesize 10M
     php_value post_max_size 10M
     php_value max_input_time 60
     php_value max_execution_time 300
+
+    # Hide PHP info
     php_flag register_globals off
     php_flag expose_php off
+
+    # Never show errors to users
+    php_flag display_errors off
+    php_flag display_startup_errors off
+    php_value error_reporting 0
+    php_flag log_errors on
+
+    # Session hardening
+    php_flag session.cookie_httponly on
+    php_value session.cookie_samesite Strict
+    php_flag session.use_strict_mode on
+    php_flag session.use_only_cookies on
+    php_flag session.use_trans_sid off
+    php_value session.gc_maxlifetime 3600
 </IfModule>
