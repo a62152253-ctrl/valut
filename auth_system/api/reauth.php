@@ -1,70 +1,49 @@
 <?php
 /**
- * api/reauth.php — Real-time password verification for sensitive operations.
- * Used before enabling/disabling 2FA, changing password, etc.
+ * Re-authentication endpoint
+ * Verifies the user's password for sensitive operations
  */
 session_start();
-include '../includes/db.php';
-include '../includes/vault_auth.php';
-
 header('Content-Type: application/json');
+
+require_once '../includes/db.php';
 
 if (!isset($_SESSION['user_id'])) {
     http_response_code(401);
-    die(json_encode(['error' => 'Not authenticated']));
+    echo json_encode(['ok' => false, 'error' => 'Not authenticated']);
+    exit;
 }
 
 $user_id = (int)$_SESSION['user_id'];
-$method  = $_SERVER['REQUEST_METHOD'];
+$password = $_POST['password'] ?? '';
 
-if ($method !== 'POST') {
-    http_response_code(405);
-    die(json_encode(['error' => 'Method not allowed']));
-}
-
-// Rate limit re-auth attempts
-vaultRateLimit('reauth_' . $user_id, 10, 300);  // 10 attempts per 5 min
-
-$input    = json_decode(file_get_contents('php://input'), true) ?? [];
-// Accept both JSON body and FormData
-$password = $_POST['password'] ?? $input['password'] ?? '';
-
-if (empty($password)) {
+if (!$password) {
     http_response_code(400);
-    die(json_encode(['error' => 'Password required']));
+    echo json_encode(['ok' => false, 'error' => 'Password required']);
+    exit;
 }
 
-// Fetch user's password hash
+// Get current password hash
 $stmt = $conn->prepare("SELECT password FROM users WHERE id = ?");
 if (!$stmt) {
     http_response_code(500);
-    die(json_encode(['error' => 'Database error']));
+    echo json_encode(['ok' => false, 'error' => 'Database error']);
+    exit;
 }
+
 $stmt->bind_param('i', $user_id);
 $stmt->execute();
-$result = $stmt->get_result();
+$row = $stmt->get_result()->fetch_assoc();
 $stmt->close();
 
-if (!$result || $result->num_rows === 0) {
-    http_response_code(401);
-    die(json_encode(['error' => 'User not found']));
-}
-
-$row = $result->fetch_assoc();
-
-// Verify password
-if (password_verify($password, $row['password'])) {
-    // Generate short-lived re-auth token (valid for 10 minutes)
-    $token = bin2hex(random_bytes(32));
-    $_SESSION['reauth_token'] = $token;
-    $_SESSION['reauth_time']  = time();
-    $_SESSION['reauth_ttl']   = 600;  // 10 minutes
-
-    logSecurityEvent('user_reauth_success', $user_id);
+if ($row && password_verify($password, $row['password'])) {
+    // Password is correct — set re-auth flag in session
+    $_SESSION['reauth_time'] = time();
     http_response_code(200);
-    die(json_encode(['ok' => true, 'token' => $token]));
+    echo json_encode(['ok' => true]);
 } else {
-    logSecurityEvent('user_reauth_failed', $user_id, 'Incorrect password provided');
     http_response_code(401);
-    die(json_encode(['error' => 'Incorrect password']));
+    echo json_encode(['ok' => false, 'error' => 'Incorrect password']);
 }
+
+$conn->close();
