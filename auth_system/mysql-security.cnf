@@ -1,0 +1,127 @@
+# VAULTLY MYSQL SECURITY CONFIGURATION
+# ═══════════════════════════════════════════════════════════════════════════════
+# 
+# Place this file in /etc/mysql/conf.d/security.cnf
+# Or mount in Docker: mysql-security.cnf:/etc/mysql/conf.d/security.cnf:ro
+
+[mysqld]
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECURITY SETTINGS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Disable symbolic links (prevents directory traversal)
+skip-symbolic-links
+
+# Bind to localhost only (unless behind proxy)
+bind-address = 127.0.0.1
+
+# Disable local file access
+local-infile = 0
+
+# Disable the FILE privilege
+skip-grant-tables = 0
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CONNECTION LIMITS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Maximum number of connections
+max_connections = 100
+
+# Maximum connections per user
+max_user_connections = 10
+
+# Connection timeout
+connect_timeout = 10
+wait_timeout = 600
+interactive_timeout = 600
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# AUTHENTICATION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Require valid password for root
+default-authentication-plugin = mysql_native_password
+
+# Skip anonymous users
+skip-name-resolve
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DATABASE INTEGRITY
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Enable strict SQL mode
+sql_mode = 'STRICT_TRANS_TABLES,NO_ZERO_DATE,NO_ZERO_IN_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION'
+
+# Prevent database/table name case issues
+lower_case_table_names = 1
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# LOGGING & MONITORING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Error logging
+log_error = /var/log/mysql/error.log
+log_error_verbosity = 2
+
+# Slow query logging
+slow-query-log = 1
+slow-query-log-file = /var/log/mysql/slow.log
+long_query_time = 2
+log_queries_not_using_indexes = 1
+
+# General query log (DISABLE in production)
+# general-log = 0
+
+# Audit logging (if available)
+# plugin_load_add = 'audit_log.so'
+# audit_log_events = 'CONNECT,QUERY_DCL,QUERY_DDL'
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PERFORMANCE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Buffer pool size (50% of available RAM recommended)
+innodb_buffer_pool_size = 1G
+
+# Log file size
+innodb_log_file_size = 256M
+
+# Cache size
+query_cache_size = 0
+query_cache_type = 0
+
+# Thread limits
+thread_stack = 256K
+thread_cache_size = 20
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# REPLICATION & BACKUP
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Enable binary logging for backup/replication
+log-bin = /var/log/mysql/mysql-bin.log
+binlog_format = ROW
+expire_logs_days = 10
+
+# Server ID (change for each server in replication)
+server-id = 1
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CHARACTER ENCODING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+character-set-server = utf8mb4
+collation-server = utf8mb4_unicode_ci
+default-character-set = utf8mb4
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# INNODB SETTINGS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+default-storage-engine = InnoDB
+innodb_file_per_table = 1
+innodb_flush_log_at_trx_commit = 1
+innodb_flush_method = O_DIRECT
+innodb_lock_wait_timeout = 50

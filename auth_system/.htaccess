@@ -1,73 +1,169 @@
-# Security headers
+# VAULTLY SECURITY HARDENING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# HTTPS ENFORCEMENT
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{HTTPS} off
+    RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+</IfModule>
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECURITY HEADERS
+# ═══════════════════════════════════════════════════════════════════════════════
+
 <IfModule mod_headers.c>
-    # Prevent clickjacking — DENY is stronger than SAMEORIGIN
+    # Prevent clickjacking attacks
     Header always set X-Frame-Options "DENY"
     
     # Prevent MIME type sniffing
     Header always set X-Content-Type-Options "nosniff"
     
-    # Enable XSS protection
+    # Enable XSS protection (legacy)
     Header always set X-XSS-Protection "1; mode=block"
     
-    # Referrer policy
+    # Referrer policy for privacy
     Header always set Referrer-Policy "strict-origin-when-cross-origin"
     
-    # Content Security Policy
-    # - style-src includes fonts.googleapis.com (app.css @import Inter)
-    # - font-src includes fonts.gstatic.com (actual woff2 files)
-    # - connect-src includes api.pwnedpasswords.com (HIBP k-anonymity check)
-    # - script-src now 'none' except unsafe-inline (disables console injection)
-    # - object-src 'none' (blocks plugin embeds)
+    # Content Security Policy (strict)
     Header always set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://api.pwnedpasswords.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
     
-    # HTTPS enforcement (uncomment for production)
-    # Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    # HSTS — enforce HTTPS for 1 year
+    Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
     
-    # Permissions policy
-    Header always set Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=()"
+    # Permissions policy — disable risky features
+    Header always set Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=()"
+    
+    # Remove server info
+    Header always unset Server
+    Header always unset X-Powered-By
+    Header always unset X-AspNet-Version
+    Header always unset X-Runtime
 </IfModule>
 
-# Disable directory listing
+# ═══════════════════════════════════════════════════════════════════════════════
+# DISABLE DIRECTORY LISTING
+# ═══════════════════════════════════════════════════════════════════════════════
+
 <IfModule mod_autoindex.c>
     Options -Indexes
 </IfModule>
 
-# Deny access to sensitive files
-<FilesMatch "\.env|\.git|config\.php|\.htaccess|backup|database">
+# ═══════════════════════════════════════════════════════════════════════════════
+# DENY ACCESS TO SENSITIVE FILES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+<FilesMatch "\.env|\.git|\.gitignore|config\.php|\.htaccess|backup|database|\.sql|\.json$">
     Order Allow,Deny
     Deny from all
 </FilesMatch>
 
-# Force HTTPS — uncomment when SSL cert is installed
-# <IfModule mod_rewrite.c>
-#     RewriteEngine On
-#     RewriteCond %{HTTPS} off
-#     RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
-# </IfModule>
+# Block access to sensitive directories
+<DirectoryMatch "^/\.">
+    Order Allow,Deny
+    Deny from all
+</DirectoryMatch>
 
-# PHP security hardening
+# ═══════════════════════════════════════════════════════════════════════════════
+# PHP SECURITY HARDENING
+# ═══════════════════════════════════════════════════════════════════════════════
+
 <IfModule mod_php.c>
+    # Disable dangerous PHP functions
+    php_admin_flag disable_functions "exec,system,shell_exec,passthru,proc_open,proc_close,popen,show_source,dl,eval,create_function"
+    
     # File limits
     php_value upload_max_filesize 10M
     php_value post_max_size 10M
     php_value max_input_time 60
     php_value max_execution_time 300
-
+    
     # Hide PHP info
     php_flag register_globals off
     php_flag expose_php off
-
-    # Never show errors to users
     php_flag display_errors off
     php_flag display_startup_errors off
     php_value error_reporting 0
     php_flag log_errors on
-
+    
     # Session hardening
     php_flag session.cookie_httponly on
-    php_value session.cookie_samesite Strict
+    php_flag session.cookie_secure on
+    php_value session.cookie_samesite "Strict"
     php_flag session.use_strict_mode on
     php_flag session.use_only_cookies on
     php_flag session.use_trans_sid off
     php_value session.gc_maxlifetime 3600
+    php_flag session.cookie_discard on
+    
+    # Input handling
+    php_flag filter.default "FILTER_SANITIZE_STRING"
+    php_flag filter.default_flags "FILTER_FLAG_NO_ENCODE_QUOTES"
+</IfModule>
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMPRESSION & CACHING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css text/javascript application/javascript application/json
+</IfModule>
+
+# Cache static assets
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresByType image/jpeg "access plus 1 year"
+    ExpiresByType image/gif "access plus 1 year"
+    ExpiresByType image/png "access plus 1 year"
+    ExpiresByType text/css "access plus 1 month"
+    ExpiresByType application/javascript "access plus 1 month"
+    ExpiresByType font/ttf "access plus 1 year"
+    ExpiresByType font/woff "access plus 1 year"
+    ExpiresByType font/woff2 "access plus 1 year"
+</IfModule>
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# RATE LIMITING & DDoS PROTECTION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Limit request rate (100 requests per 10 seconds per IP)
+<IfModule mod_ratelimit.c>
+    SetEnvIf Request_URI "^/api/" RATE_LIMIT
+    SetEnvIf Request_URI "^/login" RATE_LIMIT
+    SetEnvIf Request_URI "^/register" RATE_LIMIT
+</IfModule>
+
+# Protect against request smuggling
+Header always set Transfer-Encoding "chunked"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# REQUEST METHOD RESTRICTIONS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Disable TRACE method (can be used for XSS)
+<IfModule mod_rewrite.c>
+    RewriteCond %{REQUEST_METHOD} ^TRACE$ [NC]
+    RewriteRule .* - [F,L]
+</IfModule>
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PREVENT COMMON ATTACKS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+<IfModule mod_rewrite.c>
+    # Block SQL injection attempts
+    RewriteCond %{QUERY_STRING} (\<|%3C).*script.*(\>|%3E) [NC,OR]
+    RewriteCond %{QUERY_STRING} UNION.*SELECT [NC,OR]
+    RewriteCond %{QUERY_STRING} INSERT.*INTO [NC,OR]
+    RewriteCond %{QUERY_STRING} DELETE.*FROM [NC,OR]
+    RewriteCond %{QUERY_STRING} DROP.*TABLE [NC,OR]
+    RewriteRule .* - [F,L]
+    
+    # Block directory traversal
+    RewriteCond %{QUERY_STRING} \.\./ [NC]
+    RewriteRule .* - [F,L]
+    
+    # Block shell upload attempts
+    RewriteCond %{QUERY_STRING} (\<|%3C)php [NC]
+    RewriteRule .* - [F,L]
 </IfModule>

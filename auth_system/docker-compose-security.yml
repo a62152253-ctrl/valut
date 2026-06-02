@@ -1,0 +1,167 @@
+version: '3.8'
+
+services:
+  vaultly_web:
+    image: php:8.1-apache
+    container_name: vaultly_web
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    
+    environment:
+      # Security
+      ENVIRONMENT: production
+      APP_DEBUG: "false"
+      PHP_INI_SETTINGS: |
+        display_errors=0
+        display_startup_errors=0
+        error_reporting=32767
+        log_errors=1
+        session.cookie_httponly=1
+        session.cookie_secure=1
+        session.cookie_samesite=Strict
+        memory_limit=256M
+      
+      # Database
+      DB_HOST: vaultly_db
+      DB_USER: vaultly_user
+      DB_PASS: ${DB_PASSWORD:-change_me_in_production}
+      DB_NAME: vaultly
+    
+    volumes:
+      # Application code
+      - ./:/var/www/html
+      
+      # SSL certificates (Let's Encrypt)
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      
+      # Apache configuration
+      - ./apache-security.conf:/etc/apache2/conf-enabled/vaultly-security.conf:ro
+      
+      # Logs
+      - ./logs/apache:/var/log/apache2
+      - ./logs/php:/var/log/php
+    
+    depends_on:
+      vaultly_db:
+        condition: service_healthy
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/api/health.php"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    
+    networks:
+      - vaultly_network
+    
+    security_opt:
+      - no-new-privileges:true
+    
+    cap_drop:
+      - ALL
+    
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - NET_BIND_SERVICE
+
+  vaultly_db:
+    image: mysql:8.0
+    container_name: vaultly_db
+    restart: unless-stopped
+    
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_change_me}
+      MYSQL_USER: vaultly_user
+      MYSQL_PASSWORD: ${DB_PASSWORD:-change_me_in_production}
+      MYSQL_DATABASE: vaultly
+      MYSQL_INITDB_SKIP_TZINFO: "true"
+    
+    volumes:
+      # Database data persistence
+      - vaultly_db_data:/var/lib/mysql
+      
+      # MySQL security configuration
+      - ./mysql-security.cnf:/etc/mysql/conf.d/security.cnf:ro
+      
+      # Database initialization
+      - ./sql:/docker-entrypoint-initdb.d:ro
+      
+      # Logs
+      - ./logs/mysql:/var/log/mysql
+    
+    command: >
+      --default-authentication-plugin=mysql_native_password
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --skip-symbolic-links
+      --log-error=/var/log/mysql/error.log
+      --general-log=0
+      --slow-query-log=1
+      --slow-query-log-file=/var/log/mysql/slow.log
+    
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    
+    networks:
+      - vaultly_network
+    
+    security_opt:
+      - no-new-privileges:true
+    
+    cap_drop:
+      - ALL
+    
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETGID
+      - SETUID
+
+  vaultly_backup:
+    image: mysql:8.0
+    container_name: vaultly_backup
+    restart: unless-stopped
+    
+    environment:
+      MYSQL_USER: vaultly_user
+      MYSQL_PASSWORD: ${DB_PASSWORD:-change_me_in_production}
+    
+    volumes:
+      - ./backups:/backups
+      - ./backup-script.sh:/backup-script.sh:ro
+    
+    entrypoint: >
+      bash -c 'while true; do
+        /bin/bash /backup-script.sh
+        sleep 86400
+      done'
+    
+    depends_on:
+      - vaultly_db
+    
+    networks:
+      - vaultly_network
+    
+    security_opt:
+      - no-new-privileges:true
+    
+    cap_drop:
+      - ALL
+
+networks:
+  vaultly_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16
+
+volumes:
+  vaultly_db_data:
+    driver: local
