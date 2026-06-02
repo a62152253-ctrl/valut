@@ -167,34 +167,58 @@ const VaultManager = (() => {
 
         // ── CRUD ──────────────────────────────────────────────────────────────────
         async saveEntry(entryData) {
+            if (!privateState.encKey) throw new Error('Vault is locked');
+            if (!entryData) throw new Error('Entry data is required');
+            
             const { iv, data } = await CryptoEngine.encrypt(privateState.encKey, entryData);
             const isNew = !entryData.uuid;
             const payload = {
                 action:         isNew ? 'create' : 'update',
-                uuid:           entryData.uuid,
+                uuid:           entryData.uuid || undefined,
                 type:           entryData.type || 'login',
                 folder_id:      entryData.folder_id || null,
                 favorite:       entryData.favorite ? 1 : 0,
                 encrypted_data: data,
                 iv
             };
+            
             const resp   = await fetch('api/vault.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
+            
+            if (!resp.ok) {
+                const error = await resp.json();
+                throw new Error(error.error || `HTTP ${resp.status}`);
+            }
+            
             const result = await resp.json();
             if (result.error) throw new Error(result.error);
+            
+            // Update local state with returned UUID if new entry
+            if (isNew && result.uuid) {
+                entryData.uuid = result.uuid;
+            }
+            
             await this._loadEntries();
             return result;
         },
 
         async deleteEntry(uuid) {
-            await fetch('api/vault.php', {
+            if (!uuid) throw new Error('UUID required for deletion');
+            
+            const resp = await fetch('api/vault.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ action: 'delete', uuid })
             });
+            
+            if (!resp.ok) {
+                const error = await resp.json();
+                throw new Error(error.error || `HTTP ${resp.status}`);
+            }
+            
             await this._loadEntries();
         },
 
@@ -223,25 +247,48 @@ const VaultManager = (() => {
         },
 
         async createFolder(name, color) {
-            await fetch('api/folders.php', {
+            if (!name || name.trim().length === 0) throw new Error('Folder name is required');
+            
+            const resp = await fetch('api/folders.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'create', name, color })
+                body: JSON.stringify({ action: 'create', name: name.trim(), color })
             });
+            
+            if (!resp.ok) {
+                const error = await resp.json();
+                throw new Error(error.error || `HTTP ${resp.status}`);
+            }
+            
+            const result = await resp.json();
+            if (result.error) throw new Error(result.error);
+            
             await this._loadFolders();
-            VaultUI.renderSidebar();
+            if (VaultUI && VaultUI.renderSidebar) VaultUI.renderSidebar();
+            return result;
         },
 
         async deleteFolder(id) {
-            await fetch('api/folders.php', {
+            if (!id) throw new Error('Folder ID is required for deletion');
+            
+            const resp = await fetch('api/folders.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ action: 'delete', id })
             });
+            
+            if (!resp.ok) {
+                const error = await resp.json();
+                throw new Error(error.error || `HTTP ${resp.status}`);
+            }
+            
+            const result = await resp.json();
+            if (result.error) throw new Error(result.error);
+            
             await this._loadFolders();
             await this._loadEntries();
-            VaultUI.renderSidebar();
-        },
+            if (VaultUI && VaultUI.renderSidebar) VaultUI.renderSidebar();
+        }
 
         async exportVault() {
             const resp = await fetch('api/vault.php', {
