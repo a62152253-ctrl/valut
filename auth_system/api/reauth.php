@@ -2,6 +2,7 @@
 /**
  * Re-authentication endpoint
  * Verifies the user's password for sensitive operations
+ * Accepts both JSON and form-encoded POST data
  */
 session_start();
 header('Content-Type: application/json');
@@ -15,9 +16,25 @@ if (!isset($_SESSION['user_id'])) {
 }
 
 $user_id = (int)$_SESSION['user_id'];
-$password = $_POST['password'] ?? '';
 
-if (!$password) {
+// Parse input — handle both JSON and form-encoded POST
+$input = [];
+$content_type = $_SERVER['CONTENT_TYPE'] ?? '';
+
+if (strpos($content_type, 'application/json') !== false) {
+    // JSON request body
+    $raw_input = file_get_contents('php://input');
+    if ($raw_input) {
+        $input = json_decode($raw_input, true) ?? [];
+    }
+} else {
+    // Form-encoded
+    $input = $_POST;
+}
+
+$password = isset($input['password']) ? trim((string)$input['password']) : '';
+
+if (empty($password)) {
     http_response_code(400);
     echo json_encode(['ok' => false, 'error' => 'Password required']);
     exit;
