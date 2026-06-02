@@ -63,38 +63,69 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $username         = sanitize($_POST['username'] ?? '');
         $email            = sanitize($_POST['email']    ?? '');
         $password         = rawString($_POST['password'] ?? '');
-        if (true) { // scope wrapper
-            // Check if user already exists
-            $stmt = $conn->prepare("SELECT id FROM users WHERE email = ? OR username = ?");
-            if (!$stmt) {
-                $error = 'Database error. Please try again later.';
-                logSecurityEvent('db_error', null, $conn->error);
-            } else {
-                $stmt->bind_param('ss', $email, $username);
-                $stmt->execute();
-                $exists = $stmt->get_result()->num_rows;
-                $stmt->close();
+        
+        // Check if user already exists
+        $stmt = $conn->prepare("SELECT id FROM users WHERE email = ? OR username = ?");
+        if (!$stmt) {
+            $error = 'Database error. Please try again later.';
+            logSecurityEvent('db_error', null, $conn->error);
+        } else {
+            $stmt->bind_param('ss', $email, $username);
+            $stmt->execute();
+            $exists = $stmt->get_result()->num_rows;
+            $stmt->close();
 
-                if ($exists > 0) {
-                    $error = 'Email or username already exists';
-                    logSecurityEvent('registration_duplicate', null, "Duplicate registration attempt: $email from $client_ip");
+            if ($exists > 0) {
+                $error = 'Email or username already exists';
+                logSecurityEvent('registration_duplicate', null, "Duplicate registration attempt: $email from $client_ip");
+            } else {
+                // ═══════════════════════════════════════════════════════════════════
+                // TRANSACTION: Ensure atomic user creation and security logging
+                // ═══════════════════════════════════════════════════════════════════
+                if (!$conn->begin_transaction()) {
+                    $error = 'Database error. Please try again later.';
+                    logSecurityEvent('db_error', null, 'Transaction start failed');
                 } else {
                     $hashed_password = hashPassword($password);
                     $stmt = $conn->prepare("INSERT INTO users (username, email, password) VALUES (?, ?, ?)");
                     if (!$stmt) {
                         $error = 'Database error. Please try again later.';
                         logSecurityEvent('db_error', null, $conn->error);
+                        $conn->rollback();
                     } else {
                         $stmt->bind_param('sss', $username, $email, $hashed_password);
                         if ($stmt->execute()) {
-                            $success = 'Registration successful! Redirecting to login...';
-                            logSecurityEvent('registration_success', null, "New user registered: $email from $client_ip");
-                            header("refresh:2;url=login.php");
+                            $user_id = $conn->insert_id;
+                            $stmt->close();
+                            
+                            // Log the successful registration
+                            $logStmt = $conn->prepare(
+                                "INSERT INTO security_logs (event_type, user_id, ip_address, user_agent, details) VALUES (?, ?, ?, ?, ?)"
+                            );
+                            if ($logStmt) {
+                                $event = 'registration_success';
+                                $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+                                $ua = $_SERVER['HTTP_USER_AGENT'] ?? 'unknown';
+                                $details = "New user registered: $email";
+                                $logStmt->bind_param('sisss', $event, $user_id, $ip, $ua, $details);
+                                $logStmt->execute();
+                                $logStmt->close();
+                            }
+                            
+                            // Commit transaction
+                            if ($conn->commit()) {
+                                $success = 'Registration successful! Redirecting to login...';
+                                header("refresh:2;url=login.php");
+                            } else {
+                                $error = 'Transaction commit failed. Please try again.';
+                                logSecurityEvent('db_error', null, 'Transaction commit failed');
+                            }
                         } else {
-                            $error = 'Error during registration: ' . $stmt->error;
+                            $error = 'Error during registration. Please try again.';
                             logSecurityEvent('registration_error', null, $stmt->error);
+                            $stmt->close();
+                            $conn->rollback();
                         }
-                        $stmt->close();
                     }
                 }
             }

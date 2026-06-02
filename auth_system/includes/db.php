@@ -16,6 +16,20 @@ define('CSRF_TOKEN_LENGTH', 32);
 define('RESET_TOKEN_EXPIRY', 3600); // 1 hour
 define('SESSION_TIMEOUT', 3600); // 1 hour
 
+// ═══════════════════════════════════════════════════════════════════
+// SESSION HARDENING — must be before session_start()
+// ═══════════════════════════════════════════════════════════════════
+if (session_status() === PHP_SESSION_NONE) {
+    session_set_cookie_params([
+        'lifetime' => 3600,
+        'path'     => '/',
+        'domain'   => $_SERVER['HTTP_HOST'] ?? '',
+        'secure'   => !getenv('APP_DEBUG'),
+        'httponly' => true,
+        'samesite' => 'Strict',
+    ]);
+}
+
 // Create connection with retry logic and timeout
 $conn = null;
 $retries = 3;
@@ -142,6 +156,7 @@ $sql = "CREATE TABLE IF NOT EXISTS vault_entries (
     encrypted_data MEDIUMTEXT NOT NULL,
     iv VARCHAR(32) NOT NULL,
     favorite TINYINT(1) NOT NULL DEFAULT 0,
+    version INT DEFAULT 1,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
@@ -150,6 +165,12 @@ $sql = "CREATE TABLE IF NOT EXISTS vault_entries (
     KEY idx_ve_folder (folder_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
 $conn->query($sql);
+
+// Add version column if missing (for existing databases)
+$col_res = $conn->query("SHOW COLUMNS FROM vault_entries LIKE 'version'");
+if ($col_res && $col_res->num_rows === 0) {
+    $conn->query("ALTER TABLE vault_entries ADD COLUMN version INT DEFAULT 1");
+}
 
 // Create vault_history table
 $sql = "CREATE TABLE IF NOT EXISTS vault_history (

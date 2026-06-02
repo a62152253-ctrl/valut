@@ -1,0 +1,87 @@
+/**
+ * XSS SANITIZATION PATCH for vault-ui.js
+ * 
+ * Add this escapeHTML function to vault-ui.js within the VaultUI IIFE after the $ helper,
+ * then apply the escaping fixes to decrypted data rendering.
+ * 
+ * This replaces all esc(value) calls for DECRYPTED data (from vault)
+ * with escapeHTML(value) to prevent XSS when malicious encrypted payloads are decrypted.
+ */
+
+// ADD THIS FUNCTION after the "const $" line in VaultUI IIFE:
+function escapeHTML(str) {
+    const div = document.createElement('div');
+    div.appendChild(document.createTextNode(str || ''));
+    return div.innerHTML;
+}
+
+// APPLY TO THESE LOCATIONS IN vault-ui.js:
+
+// 1. In renderEntries(), line with entry titles and subtitles:
+// CHANGE:
+//   <div class="entry-title">${esc(e.title||'Untitled')}
+// TO:
+//   <div class="entry-title">${escapeHTML(e.title||'Untitled')}
+
+// CHANGE:
+//   <div class="entry-subtitle">${esc(subtitle)}</div>
+// TO:
+//   const subtitle = e.type === 'login'    ? escapeHTML(e.username || e.url || '')
+//                  : e.type === 'card'     ? `**** ${escapeHTML((e.cardNumber||'').slice(-4))}`
+//                  : e.type === 'identity' ? escapeHTML(`${e.firstName||''} ${e.lastName||''}`.trim())
+//                  : escapeHTML((e.content || '').slice(0, 50));
+
+// 2. In viewEntry(), change:
+//   $('viewEntryTitle').textContent = e.title || 'Untitled';
+// TO:
+//   $('viewEntryTitle').textContent = escapeHTML(e.title || 'Untitled');
+
+// 3. In field() helper function, add escapeHTML:
+// CHANGE:
+//   const display = masked ? '••••' : esc(value);
+// TO:
+//   const escapedValue = escapeHTML(String(value));
+//   const display = masked ? '••••' : escapedValue;
+
+// CHANGE:
+//   const urlPart = isUrl && value ? `<a class="vf-link" href="${esc(value)}"...
+// TO:
+//   const urlPart = isUrl && value ? `<a class="vf-link" href="${escapeHTML(String(value))}"...
+
+// 4. In fieldCard(), change:
+//   <div class="vf-val">${esc(masked)}
+// TO:
+//   <div class="vf-val">${escapeHTML(masked)}
+
+// 5. In renderFormFields(), change all input value attributes:
+// CHANGE:
+//   value="${esc(val)}"
+// TO:
+//   value="${escapeHTML(String(val))}"
+
+// CHANGE all textarea contents:
+//   >${esc(val)}</textarea>
+// TO:
+//   >${escapeHTML(String(val))}</textarea>
+
+// 6. In addCustomFieldRow(), change:
+//   value="${esc(label)}"
+//   value="${esc(value)}"
+// TO:
+//   value="${escapeHTML(label)}"
+//   value="${escapeHTML(value)}"
+
+// 7. In populateFolderSelect(), change:
+//   ${esc(f.name)}
+// TO:
+//   ${escapeHTML(f.name)}
+
+// 8. In renderIssueList(), change:
+//   <div class="issue-title">${esc(e.title||'Untitled')}</div>
+// TO:
+//   <div class="issue-title">${escapeHTML(e.title||'Untitled')}</div>
+
+// 9. In confirmDelete(), change:
+//   $('deleteEntryName').textContent = e?.title || 'this item';
+// TO:
+//   $('deleteEntryName').textContent = escapeHTML(e?.title || 'this item');

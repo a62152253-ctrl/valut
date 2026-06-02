@@ -1,0 +1,40 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell -Command \"\\(Get-Content 'c:\\\\XAMPP2\\\\htdocs\\\\ticfastr\\\\auth_system\\\\actions\\\\view_shared.php' -Raw\\) -replace 'await fetch\\\\\\(API, \\\\{method:''POST'', body:fd\\\\}\\\\\\)\\\\.then\\\\\\(x=>x\\\\.json\\\\\\(\\\\\\)\\\\\\)', 'await apiFetch\\(API, {method:''POST'', body:fd}\\)' | Set-Content 'c:\\\\XAMPP2\\\\htdocs\\\\ticfastr\\\\auth_system\\\\actions\\\\view_shared.php' -Encoding UTF8\")",
+      "WebFetch(domain:localhost)",
+      "PowerShell(try { $r = Invoke-WebRequest -Uri \"http://localhost:5555\" -TimeoutSec 5 -UseBasicParsing; $r.StatusCode; $r.Content.Substring\\(0, [Math]::Min\\(2000, $r.Content.Length\\)\\) } catch { $_.Exception.Message })",
+      "PowerShell(Get-Process -Id 22420, 21132)",
+      "PowerShell($pid = \\(Get-Content \"C:\\\\XAMPP2\\\\apache\\\\logs\\\\httpd.pid\"\\); netstat -ano | Select-String $pid.Trim\\(\\))",
+      "PowerShell($apachePid = \\(Get-Content \"C:\\\\XAMPP2\\\\apache\\\\logs\\\\httpd.pid\"\\); netstat -ano | Select-String \" $apachePid\")",
+      "PowerShell(Get-Process -Id 22420)",
+      "PowerShell(Get-ChildItem \"C:\\\\ServBay\" -ErrorAction SilentlyContinue | Select-Object Name; Get-ChildItem \"$env:LOCALAPPDATA\\\\ServBay\" -ErrorAction SilentlyContinue | Select-Object Name; Get-ChildItem \"C:\\\\Users\\\\$env:USERNAME\\\\ServBay\" -ErrorAction SilentlyContinue | Select-Object Name)",
+      "PowerShell(netstat -ano | Where-Object { $_ -match \"LISTENING\" } | ForEach-Object { $parts = $_ -split \"\\\\s+\"; $port = \\($parts[2] -split \":\"\\)[-1]; $pid2 = $parts[-1]; try { $proc = \\(Get-Process -Id $pid2 -ErrorAction Stop\\).ProcessName } catch { $proc = \"?\" }; \"$port`t$proc\" } | Sort-Object { [int]\\($_ -split \"`t\"\\)[0] } | Select-Object -First 30)",
+      "PowerShell(netstat -ano | Where-Object { $_ -match \"LISTENING\" } | ForEach-Object { $parts = $_ -split \"\\\\s+\"; $port = \\($parts[2] -split \":\"\\)[-1]; $pid2 = $parts[-1]; try { $proc = \\(Get-Process -Id $pid2 -ErrorAction Stop\\).ProcessName } catch { $proc = \"?\" }; \"$port`t$proc\" } | Sort-Object { [int]\\($_ -split \"`t\"\\)[0] } | Select-Object -Skip 30 -First 30)",
+      "PowerShell(Stop-Process -Name httpd -Force -ErrorAction SilentlyContinue)",
+      "PowerShell(& \"C:\\\\XAMPP2\\\\apache\\\\bin\\\\httpd.exe\" -k start)",
+      "PowerShell(& \"C:\\\\XAMPP2\\\\apache\\\\bin\\\\httpd.exe\")",
+      "Bash(Get-Content \"C:\\\\XAMPP2\\\\apache\\\\logs\\\\error.log\" -Tail 40)",
+      "PowerShell(Get-Process -Id 22420, 21132 -ErrorAction SilentlyContinue)",
+      "PowerShell(Get-Command mkcert -ErrorAction SilentlyContinue)",
+      "PowerShell(Get-Command openssl -ErrorAction SilentlyContinue)",
+      "PowerShell(Head -30)",
+      "Read(//c/Windows/System32/drivers/etc/**)",
+      "PowerShell(& \"C:\\\\XAMPP2\\\\apache\\\\bin\\\\httpd.exe\" -t 2>&1)",
+      "PowerShell(Stop-Process -Name \"httpd\" -Force -ErrorAction SilentlyContinue)",
+      "PowerShell(Start-Process \"C:\\\\XAMPP2\\\\apache\\\\bin\\\\httpd.exe\" -WindowStyle Hidden)",
+      "PowerShell(Get-Process -Name \"httpd\" -ErrorAction SilentlyContinue)",
+      "Bash(curl -s \"https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js\" -o \"c:/XAMPP2/htdocs/ticfastr/auth_system/js/qrcode.min.js\")",
+      "Bash(php -r \"include 'includes/db.php';\")",
+      "Bash(Remove-Item \"c:\\\\XAMPP2\\\\htdocs\\\\ticfastr\\\\auth_system\\\\vault.php\" -Force)",
+      "Bash(Get-ChildItem -Path \"c:\\\\XAMPP2\\\\htdocs\\\\ticfastr\\\\\" -Recurse -Force | Select-Object FullName, PSIsContainer | Sort-Object FullName)",
+      "Bash(grep -E '\\\\.\\(php|css|js|json|sql|md|txt|sh\\)$')",
+      "Read(//c/Users/andrz/.claude/projects/c--XAMPP2-htdocs-ticfastr/memory/**)"
+    ],
+    "additionalDirectories": [
+      "C:\\XAMPP2\\apache\\conf",
+      "C:\\ServBay\\etc\\nginx\\vhosts",
+      "C:\\ServBay\\ssl\\private\\tls-certs"
+    ]
+  }
+}

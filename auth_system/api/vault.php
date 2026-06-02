@@ -12,7 +12,7 @@ vaultRateLimit('vault_api_' . $userId, 300, 60);
 // ── GET: list all entries ────────────────────────────────────────────────────
 if ($method === 'GET') {
     $stmt = $conn->prepare(
-        "SELECT uuid, folder_id, type, encrypted_data, iv, favorite,
+        "SELECT uuid, folder_id, type, encrypted_data, iv, favorite, version,
                 created_at, updated_at
          FROM vault_entries WHERE user_id = ? ORDER BY updated_at DESC"
     );
@@ -55,17 +55,17 @@ if ($action === 'create') {
     if (!validateEncryptedDataLength($encData)) vaultJson(['error' => 'Encrypted data exceeds max size (5MB)'], 413);
 
     $stmt = $conn->prepare(
-        "INSERT INTO vault_entries (user_id, uuid, folder_id, type, encrypted_data, iv, favorite)
-         VALUES (?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO vault_entries (user_id, uuid, folder_id, type, encrypted_data, iv, favorite, version)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 1)"
     );
     if (!$stmt) vaultJson(['error' => $conn->error], 500);
     $stmt->bind_param('isisssi', $userId, $uuid, $folderId, $type, $encData, $iv, $favorite);
     if (!$stmt->execute()) vaultJson(['error' => $conn->error], 500);
     $stmt->close();
-    vaultJson(['ok' => true, 'uuid' => $uuid]);
+    vaultJson(['ok' => true, 'uuid' => $uuid, 'version' => 1]);
 }
 
-// ── UPDATE ───────────────────────────────────────────────────────────────────
+// ── UPDATE (with optimistic locking to prevent race conditions) ──────────────
 if ($action === 'update') {
     $uuid     = $body['uuid'] ?? '';
     $encData  = $body['encrypted_data'] ?? '';
@@ -73,19 +73,32 @@ if ($action === 'update') {
     $folderId = isset($body['folder_id']) && $body['folder_id'] !== '' ? (int)$body['folder_id'] : null;
     $favorite = empty($body['favorite']) ? 0 : 1;
     $type     = in_array($body['type']??'',['login','note','card','identity']) ? $body['type'] : null;
+    $version  = (int)($body['version'] ?? 1);  // Client sends current version
 
     if (empty($uuid) || empty($encData) || empty($iv)) vaultJson(['error' => 'Missing data'], 400);
     if (!validateEncryptedDataLength($encData)) vaultJson(['error' => 'Encrypted data exceeds max size (5MB)'], 413);
 
-    // Save to history first
+    // Begin transaction to ensure atomicity
+    if (!$conn->begin_transaction()) {
+        vaultJson(['error' => 'Transaction failed'], 500);
+    }
+
+    // Save current version to history FIRST
     $histStmt = $conn->prepare(
         "INSERT INTO vault_history (entry_uuid, user_id, encrypted_data, iv)
          SELECT uuid, user_id, encrypted_data, iv FROM vault_entries
          WHERE uuid = ? AND user_id = ?"
     );
-    if (!$histStmt) vaultJson(['error' => $conn->error], 500);
+    if (!$histStmt) {
+        $conn->rollback();
+        vaultJson(['error' => $conn->error], 500);
+    }
     $histStmt->bind_param('si', $uuid, $userId);
-    $histStmt->execute();
+    if (!$histStmt->execute()) {
+        $histStmt->close();
+        $conn->rollback();
+        vaultJson(['error' => 'History save failed'], 500);
+    }
     $histStmt->close();
 
     // Prune old history (keep last 10 versions)
@@ -96,31 +109,75 @@ if ($action === 'update') {
            ) sub
          )"
     );
-    if (!$pruneStmt) vaultJson(['error' => $conn->error], 500);
-    $pruneStmt->bind_param('ss', $uuid, $uuid);
-    $pruneStmt->execute();
-    $pruneStmt->close();
+    if ($pruneStmt) {
+        $pruneStmt->bind_param('ss', $uuid, $uuid);
+        $pruneStmt->execute();
+        $pruneStmt->close();
+    }
 
+    // OPTIMISTIC LOCK: Update only if version matches
+    // If version doesn't match, another client has modified this entry
     if ($type) {
         $stmt = $conn->prepare(
             "UPDATE vault_entries
-             SET encrypted_data = ?, iv = ?, folder_id = ?, favorite = ?, type = ?
-             WHERE uuid = ? AND user_id = ?"
+             SET encrypted_data = ?, iv = ?, folder_id = ?, favorite = ?, type = ?, version = version + 1
+             WHERE uuid = ? AND user_id = ? AND version = ?"
         );
-        if (!$stmt) vaultJson(['error' => $conn->error], 500);
-        $stmt->bind_param('ssiissi', $encData, $iv, $folderId, $favorite, $type, $uuid, $userId);
+        if (!$stmt) {
+            $conn->rollback();
+            vaultJson(['error' => $conn->error], 500);
+        }
+        $stmt->bind_param('ssiisii', $encData, $iv, $folderId, $favorite, $type, $uuid, $userId, $version);
     } else {
         $stmt = $conn->prepare(
             "UPDATE vault_entries
-             SET encrypted_data = ?, iv = ?, folder_id = ?, favorite = ?
-             WHERE uuid = ? AND user_id = ?"
+             SET encrypted_data = ?, iv = ?, folder_id = ?, favorite = ?, version = version + 1
+             WHERE uuid = ? AND user_id = ? AND version = ?"
         );
-        if (!$stmt) vaultJson(['error' => $conn->error], 500);
-        $stmt->bind_param('ssiisi', $encData, $iv, $folderId, $favorite, $uuid, $userId);
+        if (!$stmt) {
+            $conn->rollback();
+            vaultJson(['error' => $conn->error], 500);
+        }
+        $stmt->bind_param('ssiisii', $encData, $iv, $folderId, $favorite, $uuid, $userId, $version);
     }
-    if (!$stmt->execute()) vaultJson(['error' => $conn->error], 500);
+    
+    if (!$stmt->execute()) {
+        $stmt->close();
+        $conn->rollback();
+        vaultJson(['error' => $conn->error], 500);
+    }
+
+    // Check if update succeeded (optimistic lock validation)
+    $affectedRows = $stmt->affected_rows;
     $stmt->close();
-    vaultJson(['ok' => true]);
+
+    if ($affectedRows === 0) {
+        // Version mismatch: entry was modified by another client
+        $conn->rollback();
+        // Get current version for client retry
+        $checkStmt = $conn->prepare("SELECT version FROM vault_entries WHERE uuid = ? AND user_id = ?");
+        if ($checkStmt) {
+            $checkStmt->bind_param('si', $uuid, $userId);
+            $checkStmt->execute();
+            $res = $checkStmt->get_result()->fetch_assoc();
+            $currentVersion = $res['version'] ?? null;
+            $checkStmt->close();
+            vaultJson([
+                'error' => 'Version conflict: entry was modified. Refresh and try again.',
+                'current_version' => $currentVersion,
+                'your_version' => $version
+            ], 409);
+        } else {
+            vaultJson(['error' => 'Version mismatch'], 409);
+        }
+    }
+
+    // Commit transaction
+    if (!$conn->commit()) {
+        vaultJson(['error' => 'Commit failed'], 500);
+    }
+
+    vaultJson(['ok' => true, 'version' => $version + 1]);
 }
 
 // ── DELETE ───────────────────────────────────────────────────────────────────
@@ -128,17 +185,41 @@ if ($action === 'delete') {
     $uuid = $body['uuid'] ?? '';
     if (empty($uuid)) vaultJson(['error' => 'UUID required'], 400);
 
+    // Transaction for atomic delete
+    if (!$conn->begin_transaction()) {
+        vaultJson(['error' => 'Transaction failed'], 500);
+    }
+
     $del = $conn->prepare("DELETE FROM vault_entries WHERE uuid = ? AND user_id = ?");
-    if (!$del) vaultJson(['error' => $conn->error], 500);
+    if (!$del) {
+        $conn->rollback();
+        vaultJson(['error' => $conn->error], 500);
+    }
     $del->bind_param('si', $uuid, $userId);
-    $del->execute();
+    if (!$del->execute()) {
+        $del->close();
+        $conn->rollback();
+        vaultJson(['error' => $conn->error], 500);
+    }
     $del->close();
 
     $delHist = $conn->prepare("DELETE FROM vault_history WHERE entry_uuid = ? AND user_id = ?");
-    if (!$delHist) vaultJson(['error' => $conn->error], 500);
+    if (!$delHist) {
+        $conn->rollback();
+        vaultJson(['error' => $conn->error], 500);
+    }
     $delHist->bind_param('si', $uuid, $userId);
-    $delHist->execute();
+    if (!$delHist->execute()) {
+        $delHist->close();
+        $conn->rollback();
+        vaultJson(['error' => $conn->error], 500);
+    }
     $delHist->close();
+
+    if (!$conn->commit()) {
+        vaultJson(['error' => 'Commit failed'], 500);
+    }
+
     vaultJson(['ok' => true]);
 }
 
@@ -160,7 +241,7 @@ if ($action === 'history') {
 // ── EXPORT (encrypted JSON blob) ─────────────────────────────────────────────
 if ($action === 'export') {
     $stmt = $conn->prepare(
-        "SELECT uuid, folder_id, type, encrypted_data, iv, favorite, created_at, updated_at
+        "SELECT uuid, folder_id, type, encrypted_data, iv, favorite, version, created_at, updated_at
          FROM vault_entries WHERE user_id = ? ORDER BY type, updated_at DESC"
     );
     if (!$stmt) vaultJson(['error' => $conn->error], 500);
@@ -185,3 +266,4 @@ if ($action === 'export') {
 }
 
 vaultJson(['error' => 'Unknown action'], 400);
+?>

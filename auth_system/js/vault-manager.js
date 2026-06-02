@@ -288,7 +288,7 @@ const VaultManager = (() => {
             await this._loadFolders();
             await this._loadEntries();
             if (VaultUI && VaultUI.renderSidebar) VaultUI.renderSidebar();
-        }
+        },
 
         async exportVault() {
             const resp = await fetch('api/vault.php', {
