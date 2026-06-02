@@ -28,6 +28,7 @@ function jsonErr(string $msg, int $code = 400): void {
 
 function fetchUser(mysqli $conn, int $id): ?array {
     $stmt = $conn->prepare("SELECT totp_secret, totp_enabled, email FROM users WHERE id = ?");
+    if (!$stmt) return null;
     $stmt->bind_param('i', $id);
     $stmt->execute();
     $row = $stmt->get_result()->fetch_assoc();
@@ -43,6 +44,7 @@ switch ($action) {
     case 'status':
         $user = fetchUser($conn, $user_id);
         jsonOk(['enabled' => (bool)($user['totp_enabled'] ?? false)]);
+        break;
 
     // GET setup — generate secret + QR URL (not yet saved)
     case 'setup':
@@ -57,6 +59,7 @@ switch ($action) {
             'secret'      => $secret,
             'otpauth_uri' => TOTP::otpauthUri($secret, $user_email),
         ]);
+        break;
 
     // POST enable — verify first code and persist
     case 'enable':
@@ -72,28 +75,35 @@ switch ($action) {
             jsonErr('Incorrect code. Check your authenticator app.');
         }
 
-        // Save secret and generate backup codes
-        $stmt = $conn->prepare("UPDATE users SET totp_secret = ?, totp_enabled = 1 WHERE id = ?");
-        $stmt->bind_param('si', $secret, $user_id);
-        $stmt->execute();
-        $stmt->close();
+        // Save secret to users table
+        $updateStmt = $conn->prepare("UPDATE users SET totp_secret = ?, totp_enabled = 1 WHERE id = ?");
+        if (!$updateStmt) jsonErr($conn->error, 500);
+        $updateStmt->bind_param('si', $secret, $user_id);
+        if (!$updateStmt->execute()) jsonErr($conn->error, 500);
+        $updateStmt->close();
 
-        // Delete old backup codes and insert fresh ones
-        $conn->query("DELETE FROM totp_backup_codes WHERE user_id = $user_id");
-        $plain_codes  = TOTP::generateBackupCodes();
-        $hashed_codes = [];
+        // Delete old backup codes
+        $delOldStmt = $conn->prepare("DELETE FROM totp_backup_codes WHERE user_id = ?");
+        if (!$delOldStmt) jsonErr($conn->error, 500);
+        $delOldStmt->bind_param('i', $user_id);
+        $delOldStmt->execute();
+        $delOldStmt->close();
+
+        // Generate and insert fresh backup codes
+        $plain_codes = TOTP::generateBackupCodes();
         foreach ($plain_codes as $c) {
             $hash = password_hash($c, PASSWORD_BCRYPT);
-            $hashed_codes[] = $hash;
-            $stmt = $conn->prepare("INSERT INTO totp_backup_codes (user_id, code_hash) VALUES (?, ?)");
-            $stmt->bind_param('is', $user_id, $hash);
-            $stmt->execute();
-            $stmt->close();
+            $insertStmt = $conn->prepare("INSERT INTO totp_backup_codes (user_id, code_hash) VALUES (?, ?)");
+            if (!$insertStmt) jsonErr($conn->error, 500);
+            $insertStmt->bind_param('is', $user_id, $hash);
+            if (!$insertStmt->execute()) jsonErr($conn->error, 500);
+            $insertStmt->close();
         }
 
         unset($_SESSION['totp_pending_secret']);
         logSecurityEvent('2fa_enabled', $user_id, '2FA enabled via TOTP');
         jsonOk(['backup_codes' => $plain_codes]);
+        break;
 
     // POST disable — requires current password
     case 'disable':
@@ -102,6 +112,7 @@ switch ($action) {
             jsonErr('Password required to disable 2FA.');
         }
         $stmt = $conn->prepare("SELECT password FROM users WHERE id = ?");
+        if (!$stmt) jsonErr($conn->error, 500);
         $stmt->bind_param('i', $user_id);
         $stmt->execute();
         $row = $stmt->get_result()->fetch_assoc();
@@ -109,10 +120,23 @@ switch ($action) {
         if (!$row || !password_verify($password, $row['password'])) {
             jsonErr('Incorrect password.');
         }
-        $conn->query("UPDATE users SET totp_secret = NULL, totp_enabled = 0 WHERE id = $user_id");
-        $conn->query("DELETE FROM totp_backup_codes WHERE user_id = $user_id");
+
+        // Use prepared statements (not raw queries)
+        $disableStmt = $conn->prepare("UPDATE users SET totp_secret = NULL, totp_enabled = 0 WHERE id = ?");
+        if (!$disableStmt) jsonErr($conn->error, 500);
+        $disableStmt->bind_param('i', $user_id);
+        if (!$disableStmt->execute()) jsonErr($conn->error, 500);
+        $disableStmt->close();
+
+        $delCodesStmt = $conn->prepare("DELETE FROM totp_backup_codes WHERE user_id = ?");
+        if (!$delCodesStmt) jsonErr($conn->error, 500);
+        $delCodesStmt->bind_param('i', $user_id);
+        $delCodesStmt->execute();
+        $delCodesStmt->close();
+
         logSecurityEvent('2fa_disabled', $user_id, '2FA disabled');
         jsonOk();
+        break;
 
     // POST verify — called from 2fa_verify.php during login
     case 'verify_login':
@@ -128,7 +152,7 @@ switch ($action) {
 
         $verified = false;
 
-        // Check TOTP code
+        // Check TOTP code (6 digits)
         if (preg_match('/^\d{6}$/', $code) && TOTP::verify($user['totp_secret'], $code)) {
             $verified = true;
         }
@@ -139,14 +163,16 @@ switch ($action) {
             $bstmt = $conn->prepare(
                 "SELECT id, code_hash FROM totp_backup_codes WHERE user_id = ? AND used_at IS NULL"
             );
+            if (!$bstmt) jsonErr($conn->error, 500);
             $bstmt->bind_param('i', $pending['id']);
             $bstmt->execute();
             $bresult = $bstmt->get_result();
             while ($brow = $bresult->fetch_assoc()) {
-                // Backup codes are stored without dash
+                // Backup codes stored as hash (format without dash)
                 if (password_verify($clean, $brow['code_hash'])) {
-                    $bid   = (int) $brow['id'];
+                    $bid = (int)$brow['id'];
                     $ustmt = $conn->prepare("UPDATE totp_backup_codes SET used_at = NOW() WHERE id = ?");
+                    if (!$ustmt) jsonErr($conn->error, 500);
                     $ustmt->bind_param('i', $bid);
                     $ustmt->execute();
                     $ustmt->close();
@@ -161,16 +187,17 @@ switch ($action) {
             jsonErr('Invalid code. Try again.');
         }
 
-        // Complete login
-        $_SESSION['user_id']   = $pending['id'];
-        $_SESSION['username']  = $pending['username'];
-        $_SESSION['email']     = $pending['email'];
+        // Complete login — session setup
+        $_SESSION['user_id']    = $pending['id'];
+        $_SESSION['username']   = $pending['username'];
+        $_SESSION['email']      = $pending['email'];
         $_SESSION['ip_address'] = $_SERVER['REMOTE_ADDR'] ?? '';
         $_SESSION['user_agent'] = $_SERVER['HTTP_USER_AGENT'] ?? '';
         unset($_SESSION['2fa_pending_user']);
         session_regenerate_id(true);
         logSecurityEvent('login_success_2fa', $pending['id'], '2FA login verified');
         jsonOk(['redirect' => '../dashboard.php']);
+        break;
 
     default:
         jsonErr('Unknown action.', 404);
